@@ -1,0 +1,20 @@
+{
+  "name": "board",
+  "displayName": "내 보드",
+  "version": "0.1.0",
+  "description": "열린 결정·할 일·만든 링크(PR·이슈)를 옆 패널에 띄워 둔다. 답이 질문으로 끝나면 그 질문을 결정 칸에 옮긴다",
+  "author": { "name": "vananaHope", "url": "https://github.com/vananaHope" },
+  "homepage": "https://github.com/vananaHope/vanana-mods",
+  "repository": "https://github.com/vananaHope/vanana-mods",
+  "license": "MIT",
+  "keywords": ["claude-code-mod", "pane", "todos", "decisions", "links"],
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "autoOpen": {
+      "type": "boolean",
+      "title": "보드 저절로 열기",
+      "description": "빈 보드에 처음 항목이 생기면 패널을 저절로 엽니다. 꺼 두면 /board로만 엽니다(Orca 작업자 화면을 가리지 않게 기본은 꺼짐).",
+      "default": false
+    }
+  }
+}
