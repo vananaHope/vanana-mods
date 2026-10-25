@@ -1,9 +1,9 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { Decision, Pin, Todo } from '../types'
-import { addDecision, applyUpdate, describeBoard, isMakingMcp, lastQuestion, MAKES_COMMAND, mergePins, summarize, urlPins } from './board.ts'
-import type { Board, Update } from './board.ts'
+import type { Decision, Ids, Pin, Todo } from '../types'
+import { addDecision, applyUpdate, describeBoard, isMakingMcp, lastQuestion, MAKES_COMMAND, mergePins, normalizeUpdate, summarize, unknownIds, urlPins } from './board.ts'
+import type { Board } from './board.ts'
 
 const PANE = 'board'
 const TITLE = '내 보드'
@@ -14,6 +14,7 @@ const SHELLS = /^(?:Bash|PowerShell)$/
 const decisions = atom({ plugin: 'board', key: 'decisions' } as const, [] as Decision[], { shape: 'decisions-1' })
 const todos = atom({ plugin: 'board', key: 'todos' } as const, [] as Todo[], { shape: 'todos-1' })
 const links = atom({ plugin: 'board', key: 'links' } as const, [] as Pin[], { shape: 'links-1' })
+const last = atom({ plugin: 'board', key: 'last' } as const, { t: 0, d: 0 } as Ids, { shape: 'last-1' })
 
 // Pinboard와 달리 "질문은 전부 올려라"를 넣지 않는다. 답의 마지막 질문은 mod가 직접 옮겨 적는다.
 const DESCRIPTION = [
@@ -25,6 +26,9 @@ const DESCRIPTION = [
   'open_decisions: questions that need the user to choose. decide: close a decision by id once the user has answered it, including ones you did not open yourself.',
   'The current board, with ids, is at the end of your system prompt.',
 ].join(' ')
+
+const BOARD_HINT =
+  'Before starting work of 3 or more distinct steps, put the steps on the board and keep it current as you go (start, then done). Do this instead of listing the steps in your reply.'
 
 const strings = { type: 'array', items: { type: 'string' } }
 const SCHEMA = {
@@ -44,7 +48,17 @@ const SCHEMA = {
 
 type Options = { autoOpen?: boolean }
 
-const readBoard = async ($: EngineInterface): Promise<Board> => ({ todos: await read($, todos), decisions: await read($, decisions) })
+const readBoard = async ($: EngineInterface): Promise<Board> => ({
+  todos: await read($, todos),
+  decisions: await read($, decisions),
+  last: await read($, last),
+})
+
+const writeBoard = async ($: EngineInterface, board: Board) => {
+  await update($, last, () => board.last)
+  await update($, todos, () => board.todos)
+  await update($, decisions, () => board.decisions)
+}
 
 const isEmpty = async ($: EngineInterface) =>
   (await read($, decisions)).length + (await read($, todos)).length + (await read($, links)).length === 0
@@ -83,9 +97,11 @@ export const register: Register = (on, options) => {
   on('command.run', { command: 'board' }, async $ => ({ text: (await togglePane($)) ? '내 보드를 열었습니다.' : '내 보드를 닫았습니다.' }))
 
   // 보드는 시스템 프롬프트 끝(캐시 경계 뒤)에 붙어서 답에 목록을 되풀이할 필요가 없다
+  // 도구 설명만으로는 Claude가 보드를 잘 쓰지 않아서(실제 세션에서 확인) 보드 옆에 한 줄을 더 둔다
   on('prompt.compose', async ($, e, next) => {
     const { sections } = await next(e)
-    return { sections: [...sections, { id: 'board:board', text: describeBoard(await readBoard($)), scope: 'session' }] }
+    const text = `# User's board (${TOOL})\n${describeBoard(await readBoard($))}\n${BOARD_HINT}`
+    return { sections: [...sections, { id: 'board:board', text, scope: 'session' }] }
   })
 
   // 답에서 옮긴 질문은 사용자가 다음 말을 하면 닫는다: Claude는 도구를 따로 불러 닫지 않는다(시험에서 확인)
@@ -103,15 +119,18 @@ export const register: Register = (on, options) => {
 
   on('tool.call', { tool: TOOL }, async ($, e) => {
     if (e.agentId) return { deny: '내 보드는 메인 대화만 고칩니다.' }
-    const change = e as Update
+    const change = normalizeUpdate(e)
     if (change.open_decisions?.length) pinnedThisTurn = true
-    let board: Board = { todos: [], decisions: [] }
+    let board: Board = { todos: [], decisions: [], last: { t: 0, d: 0 } }
+    let missing: string[] = []
     await capture($, async () => {
-      board = applyUpdate(await readBoard($), change)
-      await update($, todos, () => board.todos)
-      await update($, decisions, () => board.decisions)
+      const before = await readBoard($)
+      board = applyUpdate(before, change)
+      missing = unknownIds(before, board, change)
+      await writeBoard($, board)
     })
-    return { result: describeBoard(board) }
+    const note = missing.length ? `\nIgnored ids not on the board: ${missing.join(', ')}. Use the ids shown above.` : ''
+    return { result: describeBoard(board) + note }
   })
 
   // Pinboard의 Stop hook처럼 Claude를 되돌려 보내지 않는다(턴이 하나 더 들고 "Stop hook error"가 뜬다).
@@ -120,7 +139,7 @@ export const register: Register = (on, options) => {
     const done = await next(e)
     if (e.agentId || e.reason !== 'answer' || pinnedThisTurn) return done
     const question = lastQuestion(e.answer)
-    if (question) await capture($, () => update($, decisions, old => addDecision(old, question, true)))
+    if (question) await capture($, async () => writeBoard($, addDecision(await readBoard($), question, true)))
     return done
   })
 
@@ -145,7 +164,7 @@ export const register: Register = (on, options) => {
   // 보드 갱신은 대화에 흐린 한 줄로만 남고, 보드 자체는 패널에 있다
   on('ui.render', { component: 'ToolUse', props: { tool: TOOL } }, async ($, e) => {
     const { Text } = $.ui.resolve(e)
-    return <Text dimColor>{summarize((e.props.input ?? {}) as Update)}</Text>
+    return <Text dimColor>{summarize(normalizeUpdate(e.props.input))}</Text>
   })
 
   on('ui.render', { component: 'ToolResult', props: { tool: TOOL } }, async ($, e, next) =>
