@@ -5,12 +5,16 @@ export type Decision = { id: string; text: string; isAuto?: boolean }
 
 export type Pin = { href: string; label: string }
 
+/** 할 일(t)과 결정(d)에 지금까지 붙인 가장 큰 번호 */
+export type Ids = { t: number; d: number }
+
 declare module 'claude-code' {
   interface PluginState {
     board: {
       decisions: Shaped<Decision[]>
       todos: Shaped<Todo[]>
       links: Shaped<Pin[]>
+      last: Shaped<Ids>
     }
   }
 }
