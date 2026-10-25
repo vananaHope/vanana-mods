@@ -1,7 +1,7 @@
 {
   "name": "board",
   "displayName": "내 보드",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "열린 결정·할 일·만든 링크(PR·이슈)를 옆 패널에 띄워 둔다. 답이 질문으로 끝나면 그 질문을 결정 칸에 옮긴다",
   "author": { "name": "vananaHope", "url": "https://github.com/vananaHope" },
   "homepage": "https://github.com/vananaHope/vanana-mods",

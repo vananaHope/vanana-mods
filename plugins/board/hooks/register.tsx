@@ -2,12 +2,14 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { Decision, Pin, Todo } from '../types'
-import { addDecision, applyUpdate, describeBoard, lastQuestion, MAKES_COMMAND, MAKES_MCP, mergePins, summarize, urlPins } from './board.ts'
+import { addDecision, applyUpdate, describeBoard, isMakingMcp, lastQuestion, MAKES_COMMAND, mergePins, summarize, urlPins } from './board.ts'
 import type { Board, Update } from './board.ts'
 
 const PANE = 'board'
 const TITLE = '내 보드'
 const TOOL = 'mcp__board__update'
+/** Windows의 PowerShell 도구는 다른 플랫폼의 타입에 없어서 이름 대신 정규식으로 맞춘다 */
+const SHELLS = /^(?:Bash|PowerShell)$/
 
 const decisions = atom({ plugin: 'board', key: 'decisions' } as const, [] as Decision[], { shape: 'decisions-1' })
 const todos = atom({ plugin: 'board', key: 'todos' } as const, [] as Todo[], { shape: 'todos-1' })
@@ -73,7 +75,8 @@ export const register: Register = (on, options) => {
 
   on('session.start', async ($, e, next) => {
     await $.command.register({ name: 'board', description: '열린 결정·할 일·링크 패널 열기·닫기', immediate: true })
-    await $.tool.register({ name: 'update', description: DESCRIPTION, inputSchema: SCHEMA })
+    // ToolSearch 뒤에 두면 Claude가 스키마를 먼저 불러와야 해서 잘 쓰지 않는다: 처음부터 도구 목록에 둔다
+    await $.tool.register({ name: 'update', description: DESCRIPTION, inputSchema: SCHEMA, isDeferred: false })
     return next(e)
   })
 
@@ -122,9 +125,10 @@ export const register: Register = (on, options) => {
   })
 
   // 무언가를 만든 명령(gh pr create, git push 등)이면 그 결과의 링크를 모은다
-  on('tool.call', { tool: ['Bash', 'PowerShell'] }, async ($, e, next) => {
+  on('tool.call', { tool: SHELLS }, async ($, e, next) => {
     const ran = await next(e)
-    if (ran.deny !== undefined || ran.isError === true || e.agentId || !MAKES_COMMAND.test(e.command)) return ran
+    const command = 'command' in e && typeof e.command === 'string' ? e.command : ''
+    if (ran.deny !== undefined || ran.isError === true || e.agentId || !MAKES_COMMAND.test(command)) return ran
     const found = urlPins(ran.text ?? '')
     if (found.length > 0 && found.length <= 3) await capture($, () => update($, links, old => mergePins(old, found)))
     return ran
@@ -132,7 +136,7 @@ export const register: Register = (on, options) => {
 
   on('tool.call', async ($, e, next) => {
     const ran = await next(e)
-    if (e.agentId || !MAKES_MCP.test(e.tool) || !('text' in ran) || ran.isError) return ran
+    if (e.agentId || !isMakingMcp(e.tool) || !('text' in ran) || ran.isError) return ran
     const found = urlPins(ran.text ?? '')
     if (found.length > 0 && found.length <= 3) await capture($, () => update($, links, old => mergePins(old, found)))
     return ran

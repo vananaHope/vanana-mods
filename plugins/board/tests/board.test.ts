@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { addDecision, applyUpdate, lastQuestion, mergePins, urlPins } from '../hooks/board.ts'
+import { addDecision, applyUpdate, isMakingMcp, lastQuestion, mergePins, urlPins } from '../hooks/board.ts'
 
 test('할 일을 더하고 시작하고 끝내면 진행 중 표시가 빠진다', () => {
   let board = applyUpdate({ todos: [], decisions: [] }, { add_todos: ['가', '나'], start_todo: 't1' })
@@ -30,4 +30,20 @@ test('링크는 GitHub PR·이슈에 짧은 이름을 붙이고 같은 주소는
   const found = urlPins('Created https://github.com/me/repo/pull/12.')
   expect(found).toEqual([{ href: 'https://github.com/me/repo/pull/12', label: 'repo PR #12' }])
   expect(mergePins(found, found)).toHaveLength(1)
+})
+
+test('git push 결과의 저장소 주소(.git)는 링크로 모으지 않는다', () => {
+  const out = 'remote:   https://github.com/me/repo/pull/new/fix\nTo https://github.com/me/repo.git\n'
+  expect(urlPins(out).map(p => p.href)).toEqual(['https://github.com/me/repo/pull/new/fix'])
+})
+
+test('만드는 MCP 도구만 링크를 모은다: 읽기 도구와 서버 이름은 보지 않는다', () => {
+  expect(isMakingMcp('mcp__github__create_pull_request')).toBe(true)
+  expect(isMakingMcp('mcp__Slack__slack_send_message')).toBe(true)
+  expect(isMakingMcp('mcp__Notion__notion-create-file-upload')).toBe(true)
+  expect(isMakingMcp('mcp__Slack__slack_read_canvas')).toBe(false)
+  expect(isMakingMcp('mcp__Notion__notion-list-shared-pages')).toBe(false)
+  expect(isMakingMcp('mcp__share-tools__get_status')).toBe(false)
+  expect(isMakingMcp('mcp__board__update')).toBe(false)
+  expect(isMakingMcp('Bash')).toBe(false)
 })
