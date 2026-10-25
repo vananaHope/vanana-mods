@@ -76,13 +76,21 @@ export function lastQuestion(reply: string): string | undefined {
 
 // 무언가를 만드는 명령과 MCP 도구에서만 링크를 모은다. 읽기·조회 결과의 URL은 건너뛴다.
 export const MAKES_COMMAND = /\bgh\s+(?:(?:pr|issue|release|repo|gist)\s+create|(?:pr|issue)\s+comment)\b|\bgit\s+push\b/
-export const MAKES_MCP = /^mcp__.*(?:create|draft|send|publish|share|canvas|upload)/i
+const MAKES_MCP = /create|draft|send|publish|share|canvas|upload/i
+const READS_MCP = /(?:^|[_-])(?:read|get|list|search|fetch|query|download)(?:[_-]|$)/i
+
+/** 서버 이름은 빼고 도구 이름만 본다: slack_read_canvas, list-shared-pages 같은 읽기 도구는 건너뛴다 */
+export function isMakingMcp(tool: string): boolean {
+  const name = /^mcp__.+?__(.+)$/.exec(tool)?.[1]
+  return name !== undefined && MAKES_MCP.test(name) && !READS_MCP.test(name)
+}
 
 const URL = /https:\/\/[A-Za-z0-9.-]+(?::\d+)?(?:\/[A-Za-z0-9\-._~:/?#[\]!$&'()*+,;=%@]*)?/g
 
 export const urlPins = (text: string): Pin[] =>
   [...new Set([...text.matchAll(URL)].map(m => m[0].replace(/[)\].,;:'!?*]+$/, '')))]
-    .filter(href => !href.includes('@') && href.length <= 2048)
+    // git push가 찍는 저장소 주소(…/repo.git)는 만든 것이 아니다
+    .filter(href => !href.includes('@') && !/\.git$/.test(href) && href.length <= 2048)
     .map(href => {
       const gh = /github\.com\/[^/]+\/([^/]+)\/(pull|issues)\/(\d+)/.exec(href)
       return { href, label: gh ? `${gh[1]} ${gh[2] === 'pull' ? 'PR' : '이슈'} #${gh[3]}` : href.slice(8) }

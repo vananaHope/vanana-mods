@@ -6,6 +6,9 @@ import type { Nudge } from './loops.ts'
 
 type Options = { failLimit?: number; editLimit?: number }
 
+/** Windows의 PowerShell 도구는 다른 플랫폼의 타입에 없어서 이름 대신 정규식으로 맞춘다 */
+const SHELLS = /^(?:Bash|PowerShell)$/
+
 /** 맴돌기를 알린다: 사람에게는 토스트, Claude에게는 도구 결과 뒤에 붙는 한 줄(사람에게는 보이지 않는다) */
 function withNudge<T extends { context?: readonly string[] }>($: EngineInterface, ran: T, nudge: Nudge | undefined): T {
   if (!nudge) return ran
@@ -22,9 +25,9 @@ export const register: Register = (on, options) => {
     return next(e)
   })
 
-  on('tool.call', { tool: ['Bash', 'PowerShell'] }, async ($, e, next) => {
+  on('tool.call', { tool: SHELLS }, async ($, e, next) => {
     const ran = await next(e)
-    if (ran.deny !== undefined) return ran
+    if (ran.deny !== undefined || !('command' in e) || typeof e.command !== 'string') return ran
     return withNudge($, ran, loops.command(e.command, ran.isError === true, e.agentId))
   })
 

@@ -1,7 +1,7 @@
 {
   "name": "loop-guard",
   "displayName": "맴돌기 막기",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "한 턴에 같은 명령이 되풀이해 실패하거나 이미 고친 코드를 거듭 다시 고치면, 토스트로 알리고 Claude에게 멈추고 원인을 다시 보라고 한 줄을 붙인다",
   "author": { "name": "vananaHope", "url": "https://github.com/vananaHope" },
   "homepage": "https://github.com/vananaHope/vanana-mods",

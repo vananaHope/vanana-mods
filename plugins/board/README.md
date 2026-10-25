@@ -8,3 +8,9 @@
 - 패널 키: `l` 링크 비우기, `c` 완료 지우기, `x` 결정 모두 닫기.
 - 설정(`/config`): `autoOpen`(기본 꺼짐). 켜면 빈 보드에 처음 항목이 생길 때 패널이 저절로 열린다.
 - 서브에이전트는 보드를 고치지 않는다. 모든 값은 세션 동안만 남는다(`/clear`하면 빈 보드).
+
+## 설치
+
+```
+/plugin install board --marketplace vananaHope/vanana-mods
+```
