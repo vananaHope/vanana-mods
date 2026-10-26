@@ -2,7 +2,22 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { Decision, Ids, Pin, Todo } from '../types'
-import { addDecision, applyUpdate, describeBoard, isMakingMcp, lastQuestion, MAKES_COMMAND, mergePins, normalizeUpdate, summarize, unknownIds, urlPins } from './board.ts'
+import {
+  addDecision,
+  answerDecisions,
+  applyUpdate,
+  artifactPin,
+  describeBoard,
+  isMakingMcp,
+  isStale,
+  lastQuestion,
+  MAKES_COMMAND,
+  mergePins,
+  normalizeUpdate,
+  summarize,
+  unknownIds,
+  urlPins,
+} from './board.ts'
 import type { Board } from './board.ts'
 
 const PANE = 'board'
@@ -15,6 +30,7 @@ const decisions = atom({ plugin: 'board', key: 'decisions' } as const, [] as Dec
 const todos = atom({ plugin: 'board', key: 'todos' } as const, [] as Todo[], { shape: 'todos-1' })
 const links = atom({ plugin: 'board', key: 'links' } as const, [] as Pin[], { shape: 'links-1' })
 const last = atom({ plugin: 'board', key: 'last' } as const, { t: 0, d: 0 } as Ids, { shape: 'last-1' })
+const showDone = atom({ plugin: 'board', key: 'showDone' } as const, false, { shape: 'show-done-1' })
 
 // Pinboard와 달리 "질문은 전부 올려라"를 넣지 않는다. 답의 마지막 질문은 mod가 직접 옮겨 적는다.
 const DESCRIPTION = [
@@ -104,10 +120,11 @@ export const register: Register = (on, options) => {
     return { sections: [...sections, { id: 'board:board', text, scope: 'session' }] }
   })
 
-  // 답에서 옮긴 질문은 사용자가 다음 말을 하면 닫는다: Claude는 도구를 따로 불러 닫지 않는다(시험에서 확인)
+  // 답에서 옮긴 질문은 사용자가 다음 말을 하면 닫는다: Claude는 도구를 따로 불러 닫지 않는다(시험에서 확인).
+  // Claude가 올린 결정은 남기되, 사용자가 답한 횟수를 세어 오래된 것을 드러낸다(Claude가 decide를 잊는다).
   on('prompt.submit', async ($, e, next) => {
     if (!e.command && e.text.trim()) {
-      await update($, decisions, old => (old.some(d => d.isAuto) ? old.filter(d => !d.isAuto) : old)).catch(() => undefined)
+      await update($, decisions, old => (old.length ? answerDecisions(old) : old)).catch(() => undefined)
     }
     return next(e)
   })
@@ -155,7 +172,13 @@ export const register: Register = (on, options) => {
 
   on('tool.call', async ($, e, next) => {
     const ran = await next(e)
-    if (e.agentId || !isMakingMcp(e.tool) || !('text' in ran) || ran.isError) return ran
+    if (e.agentId || !('text' in ran) || ran.isError) return ran
+    if (e.tool === 'Artifact') {
+      const pin = artifactPin(e, ran.text ?? '')
+      if (pin) await capture($, () => update($, links, old => mergePins(old, [pin])))
+      return ran
+    }
+    if (!isMakingMcp(e.tool)) return ran
     const found = urlPins(ran.text ?? '')
     if (found.length > 0 && found.length <= 3) await capture($, () => update($, links, old => mergePins(old, found)))
     return ran
@@ -178,6 +201,7 @@ export const register: Register = (on, options) => {
     const allDecisions = await read($, decisions)
     const allTodos = await read($, todos)
     const allLinks = await read($, links)
+    const isDoneShown = await read($, showDone)
     const doneCount = allTodos.filter(t => t.isDone).length
 
     const header = (title: string, count: string) => (
@@ -202,14 +226,29 @@ export const register: Register = (on, options) => {
       <Box flexDirection="column" width={inner + 2} padding={1}>
         {header('열린 결정', allDecisions.length ? String(allDecisions.length) : '')}
         {allDecisions.length === 0 && empty('기다리는 결정이 없습니다.')}
-        {allDecisions.map(d => item('?', d.isAuto ? `${d.text} (답에서 옮김)` : d.text))}
+        {allDecisions.map(d =>
+          d.isAuto ? item('?', `${d.text} (답에서 옮김)`) : isStale(d) ? item('?', `${d.text} (답 ${d.waited}번 지남)`, true) : item('?', d.text),
+        )}
         <Text> </Text>
 
         {header('할 일', allTodos.length ? `${doneCount}/${allTodos.length}` : '')}
         {allTodos.length === 0 && empty('아직 할 일이 없습니다.')}
         {allTodos.filter(t => !t.isDone).map(t => (t.isActive ? item('▸', t.text, false, 'warning') : item('○', t.text)))}
-        {/* 끝난 할 일은 한 줄로 접어서 남은 일이 위에 있게 */}
-        {doneCount > 0 && <Text dimColor>{`  ✓ ${doneCount}개 완료`}</Text>}
+        {/* 끝난 할 일은 한 줄로 접어서 남은 일이 위에 있게: 그 줄을 누르면 펼친다 */}
+        {doneCount > 0 && (
+          <Box flexDirection="row" width={inner}>
+            <Text>{'  '}</Text>
+            <Button
+              key="toggle-done"
+              label={`${isDoneShown ? '▾' : '▸'} ✓ ${doneCount}개 완료`}
+              hotkey="d"
+              plain
+              dimColor
+              onPress={() => update($, showDone, old => !old)}
+            />
+          </Box>
+        )}
+        {doneCount > 0 && isDoneShown && allTodos.filter(t => t.isDone).map(t => item('  ✓', t.text, true))}
         <Text> </Text>
 
         <Box flexDirection="row" justifyContent="space-between" width={inner}>

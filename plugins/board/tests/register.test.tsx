@@ -116,3 +116,48 @@ test('무언가를 만든 명령의 링크만 패널에 모은다', async ($, on
   expect((await ui.find({ type: 'Link' }))?.text).toBe('repo PR #12')
   await ui.unmount()
 })
+
+test('완료한 할 일은 접혀 있다가 누르면 펼쳐지고 다시 누르면 접힌다', async ($, on) => {
+  standIn(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await $.tool.call({ tool: 'mcp__board__update', add_todos: ['끝낸 일', '남은 일'], done_todos: ['t1'] } as never)
+
+  for (const surface of ['terminal', 'desktop'] as const) {
+    const ui = await $.ui.mount({ ...PANE, surface })
+    expect((await ui.find({ key: 'toggle-done' }))?.text).toContain('▸ ✓ 1개 완료')
+    expect(await ui.find({ type: 'Text', text: /끝낸 일/ })).toBeUndefined()
+
+    await ui.press({ key: 'toggle-done' })
+    expect((await ui.find({ key: 'toggle-done' }))?.text).toContain('▾ ✓ 1개 완료')
+    expect((await ui.find({ type: 'Text', text: /끝낸 일/ }))?.text).toBe('끝낸 일')
+
+    await ui.press({ key: 'toggle-done' })
+    expect(await ui.find({ type: 'Text', text: /끝낸 일/ })).toBeUndefined()
+    await ui.unmount()
+  }
+})
+
+test('Artifact로 게시한 페이지 링크를 패널에 모은다', async ($, on) => {
+  standIn(on)
+  on('tool.call', () => ({ result: {}, text: 'Published https://claude.ai/code/artifact/abc-123\n' }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await $.tool.call({ tool: 'Artifact', action: 'list' } as never)
+  await $.tool.call({ tool: 'Artifact', file_path: '/tmp/plan.html' } as never)
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect(await ui.findAll({ type: 'Link' })).toHaveLength(1)
+  expect((await ui.find({ type: 'Link' }))?.text).toBe('아티팩트 plan')
+  await ui.unmount()
+})
+
+test('Claude가 올린 결정이 사용자 답 두 번 동안 열려 있으면 패널에 흐리게 표시한다', async ($, on) => {
+  standIn(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await $.tool.call({ tool: 'mcp__board__update', open_decisions: ['배포할까요?'] } as never)
+  await $.prompt.submit({ text: '먼저 테스트', wait: false, origin: { kind: 'composer' } })
+  await $.prompt.submit({ text: '계속', wait: false, origin: { kind: 'composer' } })
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect((await ui.find({ type: 'Text', text: /배포할까요/ }))?.text).toBe('배포할까요? (답 2번 지남)')
+  await ui.unmount()
+})

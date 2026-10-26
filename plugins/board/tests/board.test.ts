@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { addDecision, applyUpdate, isMakingMcp, lastQuestion, mergePins, normalizeUpdate, unknownIds, urlPins } from '../hooks/board.ts'
+import { addDecision, answerDecisions, applyUpdate, artifactPin, describeBoard, isMakingMcp, lastQuestion, mergePins, normalizeUpdate, unknownIds, urlPins } from '../hooks/board.ts'
 import type { Board } from '../hooks/board.ts'
 
 const EMPTY: Board = { todos: [], decisions: [], last: { t: 0, d: 0 } }
@@ -96,4 +96,30 @@ test('만드는 MCP 도구만 링크를 모은다: 읽기 도구와 서버 이�
   expect(isMakingMcp('mcp__share-tools__get_status')).toBe(false)
   expect(isMakingMcp('mcp__board__update')).toBe(false)
   expect(isMakingMcp('Bash')).toBe(false)
+})
+
+test('보드 글에는 끝난 할 일을 id만 한 줄로 적는다', () => {
+  const board = applyUpdate(EMPTY, { add_todos: ['가', '나', '다'], start_todo: 't3', done_todos: ['t1', 't2'] })
+  expect(describeBoard(board)).toBe('Board now:\nt3 [>] 다\nDone (2): t1, t2')
+})
+
+test('사용자가 답할 때마다 Claude가 올린 결정은 기다린 횟수가 늘고, 두 번이면 닫으라고 적는다', () => {
+  let board = addDecision(addDecision(EMPTY, '배포할까요?'), '옮긴 질문?', true)
+  board = { ...board, decisions: answerDecisions(board.decisions) }
+  expect(board.decisions).toEqual([{ id: 'd1', text: '배포할까요?', waited: 1 }])
+  expect(describeBoard(board)).not.toContain('decide it')
+  board = { ...board, decisions: answerDecisions(board.decisions) }
+  expect(describeBoard(board)).toContain('d1 [?] 배포할까요? (open across 2 user replies: decide it if already answered)')
+})
+
+test('Artifact 도구는 게시할 때만 링크를 남기고, 제목이나 파일 이름을 붙인다', () => {
+  const text = 'Published https://claude.ai/code/artifact/0a1b-2c3d (private).'
+  expect(artifactPin({ file_path: 'C:\\tmp\\report.html' }, text)).toEqual({
+    href: 'https://claude.ai/code/artifact/0a1b-2c3d',
+    label: '아티팩트 report',
+  })
+  expect(artifactPin({ action: 'publish', title: '주간 보고' }, text)?.label).toBe('아티팩트 주간 보고')
+  expect(artifactPin({ action: 'read', url: 'x' }, text)).toBeUndefined()
+  expect(artifactPin({ asset: true, file_path: 'a.png' }, text)).toBeUndefined()
+  expect(artifactPin({}, 'no link here')).toBeUndefined()
 })
