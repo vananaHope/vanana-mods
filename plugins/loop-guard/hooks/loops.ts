@@ -6,6 +6,15 @@ const lines = (text: string) => text.split('\n').map(l => l.trim()).filter(l => 
 
 export const normCommand = (command: string) => command.replace(/\s+/g, ' ').trim().slice(0, 300)
 
+/**
+ * 같은 파일을 한 이름으로: Windows에서는 C:\a\b.ts와 c:/a/b.ts가 같은 파일이다.
+ * 드라이브 글자로 시작하는 경로만 대소문자를 무시한다(다른 플랫폼은 대소문자를 가린다).
+ */
+export const normPath = (path: string) => {
+  const slashed = path.replace(/\\/g, '/').replace(/\/{2,}/g, '/')
+  return /^[A-Za-z]:\//.test(slashed) ? slashed.toLowerCase() : slashed
+}
+
 type Loop = {
   failures: Map<string, number>
   reworks: Map<string, number>
@@ -62,16 +71,17 @@ export class LoopWatch {
   /** old: Edit의 old_string(Write면 undefined), next: 새로 쓴 내용 */
   edit(path: string, old: string | undefined, next: string, agentId?: string): Nudge | undefined {
     const loop = this.loop(agentId)
-    const seen = loop.written.get(path)
+    const key = normPath(path)
+    const seen = loop.written.get(key)
     // 한 파일의 여러 곳을 고치는 건 계획이고, 이번 턴에 이미 고친 코드를 또 고치는 건 맴돌기다
     const isRework = seen !== undefined && (old === undefined || lines(old).some(l => seen.has(l)))
-    loop.written.set(path, new Set([...(seen ?? []), ...lines(next)]))
+    loop.written.set(key, new Set([...(seen ?? []), ...lines(next)]))
     if (!isRework) return undefined
-    const n = (loop.reworks.get(path) ?? 0) + 1
-    loop.reworks.set(path, n)
+    const n = (loop.reworks.get(key) ?? 0) + 1
+    loop.reworks.set(key, n)
     if (n < this.editLimit) return undefined
     const name = path.split(/[\\/]/).at(-1) ?? path
-    return this.once(loop, `edit:${path}`, {
+    return this.once(loop, `edit:${key}`, {
       toast: `${name}: 이번 턴에 같은 코드를 ${n}번 다시 고쳤습니다`,
       note:
         `You have now rewritten code you already changed in ${path} ${n} times this turn. ` +

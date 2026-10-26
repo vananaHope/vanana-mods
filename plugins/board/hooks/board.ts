@@ -87,12 +87,29 @@ export function addDecision(board: Board, text: string, isAuto = false): Board {
   return { ...board, decisions: [...board.decisions, isAuto ? { ...decision, isAuto } : decision], last: { ...board.last, d: n } }
 }
 
+/** 사용자가 이만큼 답한 뒤에도 열려 있는 결정은 오래된 것으로 본다 */
+export const STALE_AFTER = 2
+
+export const isStale = (d: Decision) => !d.isAuto && (d.waited ?? 0) >= STALE_AFTER
+
+/** 사용자가 답을 보내면: 답에서 옮긴 결정은 닫고, Claude가 올린 결정은 기다린 횟수를 하나 올린다 */
+export const answerDecisions = (old: Decision[]): Decision[] =>
+  old.filter(d => !d.isAuto).map(d => ({ ...d, waited: (d.waited ?? 0) + 1 }))
+
+/**
+ * 시스템 프롬프트와 도구 결과에 붙는 보드. 끝난 할 일은 매 턴 쌓이기만 해서 id만 한 줄로 줄인다
+ * (패널에서는 펼쳐 볼 수 있다). 오래 열린 결정에는 이미 답을 들었으면 닫으라는 말을 붙인다.
+ */
 export function describeBoard(board: Board): string {
   if (board.todos.length + board.decisions.length === 0) return 'Board is empty.'
+  const done = board.todos.filter(t => t.isDone).map(t => t.id)
   return [
     'Board now:',
-    ...board.todos.map(t => `${t.id} [${t.isDone ? 'x' : t.isActive ? '>' : ' '}] ${t.text}`),
-    ...board.decisions.map(d => `${d.id} [?] ${d.text}`),
+    ...board.todos.filter(t => !t.isDone).map(t => `${t.id} [${t.isActive ? '>' : ' '}] ${t.text}`),
+    ...(done.length ? [`Done (${done.length}): ${done.join(', ')}`] : []),
+    ...board.decisions.map(d =>
+      isStale(d) ? `${d.id} [?] ${d.text} (open across ${d.waited} user replies: decide it if already answered)` : `${d.id} [?] ${d.text}`,
+    ),
   ].join('\n')
 }
 
@@ -168,6 +185,22 @@ export const urlPins = (text: string): Pin[] =>
       const gh = /github\.com\/[^/]+\/([^/]+)\/(pull|issues)\/(\d+)/.exec(href)
       return { href, label: gh ? `${gh[1]} ${gh[2] === 'pull' ? 'PR' : '이슈'} #${gh[3]}` : href.slice(8) }
     })
+
+const ARTIFACT_URL = /https:\/\/claude\.ai\/(?:code\/)?artifact\/[A-Za-z0-9-]+/
+
+/**
+ * Artifact 도구로 게시한 페이지의 링크. 셸 명령도 MCP 도구도 아니어서 따로 본다.
+ * 읽기·목록·삭제·자산 올리기는 건너뛰고, 이름은 제목이나 파일 이름으로 붙인다.
+ */
+export function artifactPin(input: unknown, text: string): Pin | undefined {
+  const raw = (input ?? {}) as { action?: unknown; asset?: unknown; title?: unknown; file_path?: unknown }
+  if ((raw.action !== undefined && raw.action !== 'publish') || raw.asset === true) return undefined
+  const href = ARTIFACT_URL.exec(text)?.[0]
+  if (!href) return undefined
+  const file = typeof raw.file_path === 'string' ? raw.file_path.split(/[\\/]/).at(-1)?.replace(/\.[^.]+$/, '') : undefined
+  const name = (typeof raw.title === 'string' && raw.title.trim()) || file
+  return { href, label: name ? `아티팩트 ${name}` : href.slice(8) }
+}
 
 /** 새 링크를 앞에, 같은 주소는 하나만, 최대 12개 */
 export const mergePins = (old: Pin[], found: Pin[]): Pin[] =>
