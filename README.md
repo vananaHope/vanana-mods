@@ -35,6 +35,6 @@ claude plugin install loop-guard --marketplace vananaHope/vanana-mods
 2. `.claude-plugin/marketplace.json`의 `plugins`에 `{ "name": "<이름>", "source": "./plugins/<이름>" }`를 더한다.
 3. `claude plugin validate .`과 `claude plugin test plugins/<이름>`으로 확인한다.
 
-고칠 때마다 그 mod의 `plugin.json` `version`을 올려야 다른 컴퓨터의 `claude plugin update`가 새 버전을 받는다.
+고칠 때마다 그 mod의 `plugin.json` `version`을 올려야 다른 컴퓨터의 `claude plugin update`가 새 버전을 받는다. PR마다 GitHub Actions(`.github/workflows/check.yml`)가 validate·test를 돌리고, 고친 mod의 version이 그대로면 실패한다.
 
 가져온 코드는 [NOTICE.md](NOTICE.md).

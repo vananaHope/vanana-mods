@@ -1,0 +1,54 @@
+# mod마다 validate·test를 돌리고, PR에서 고친 mod의 version이 올라갔는지 본다
+name: check
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Claude Code 설치
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: 마켓플레이스 검사
+        run: claude plugin validate .
+
+      - name: mod마다 검사·테스트
+        run: |
+          for dir in plugins/*/; do
+            echo "::group::${dir}"
+            claude plugin validate "$dir"
+            if [ -d "${dir}tests" ]; then claude plugin test "$dir"; fi
+            echo "::endgroup::"
+          done
+
+      # 버전을 올리지 않으면 다른 컴퓨터의 claude plugin update가 새 코드를 받지 않는다
+      - name: 고친 mod의 version 확인
+        if: github.event_name == 'pull_request'
+        run: |
+          base="origin/${{ github.base_ref }}"
+          status=0
+          for dir in plugins/*/; do
+            name=$(basename "$dir")
+            manifest="${dir}.claude-plugin/plugin.json"
+            git diff --quiet "$base"...HEAD -- "$dir" && continue
+            git cat-file -e "$base:$manifest" 2>/dev/null || continue
+            old=$(git show "$base:$manifest" | node -pe 'JSON.parse(require("fs").readFileSync(0)).version')
+            new=$(node -pe "require('./$manifest').version")
+            if [ "$old" = "$new" ]; then
+              echo "::error file=$manifest::$name을 고쳤는데 version이 $old 그대로입니다"
+              status=1
+            fi
+          done
+          exit $status
